@@ -1,0 +1,14 @@
+{
+  "name": "saas-app",
+  "version": "1.0.0",
+  "description": "SaaS application like Linear/Jira",
+  "scripts": {
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install",
+    "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
+    "build": "cd frontend && npm run build",
+    "test": "cd backend && npm run test && cd ../frontend && npm run test"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}
