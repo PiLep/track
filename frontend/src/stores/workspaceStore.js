@@ -9,9 +9,12 @@ const useWorkspaceStore = create((set, get) => ({
   fetchWorkspaces: async () => {
     try {
       set({ loading: true })
-      const response = await fetch('http://localhost:3001/api/workspaces', {
+      const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001'
+      // Get token from sessionStorage first, then localStorage
+      const token = sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token') || localStorage.getItem('token')
+      const response = await fetch(`${API_BASE}/api/workspaces`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       })
 
@@ -42,11 +45,14 @@ const useWorkspaceStore = create((set, get) => ({
   createWorkspace: async (name, description) => {
     try {
       set({ loading: true })
-      const response = await fetch('http://localhost:3001/api/workspaces', {
+      const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001'
+      // Get token from sessionStorage first, then localStorage
+      const token = sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token') || localStorage.getItem('token')
+      const response = await fetch(`${API_BASE}/api/workspaces`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({ name, description })
       })
@@ -69,11 +75,14 @@ const useWorkspaceStore = create((set, get) => ({
   // Invite user to workspace
   inviteUser: async (workspaceId, email, role = 'member') => {
     try {
-      const response = await fetch(`http://localhost:3001/api/workspaces/${workspaceId}/invite`, {
+      const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001'
+      // Get token from sessionStorage first, then localStorage
+      const token = sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token') || localStorage.getItem('token')
+      const response = await fetch(`${API_BASE}/api/workspaces/${workspaceId}/invite`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({ email, role })
       })

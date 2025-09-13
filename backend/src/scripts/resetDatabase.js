@@ -23,14 +23,22 @@ async function resetDatabase() {
     await db.query('DELETE FROM projects');
     await db.query('DELETE FROM team_members');
     await db.query('DELETE FROM teams');
+    await db.query('DELETE FROM invitations');
+    await db.query('DELETE FROM workspace_members');
+    await db.query('DELETE FROM workspaces');
     await db.query('DELETE FROM users');
+    await db.query('DELETE FROM migrations');
 
     console.log('✅ All data cleared');
 
     // Reset sequences
     console.log('🔄 Resetting sequences...');
     await db.query('ALTER SEQUENCE users_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE workspaces_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE workspace_members_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE invitations_id_seq RESTART WITH 1');
     await db.query('ALTER SEQUENCE teams_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE team_members_id_seq RESTART WITH 1');
     await db.query('ALTER SEQUENCE projects_id_seq RESTART WITH 1');
     await db.query('ALTER SEQUENCE issues_id_seq RESTART WITH 1');
     await db.query('ALTER SEQUENCE comments_id_seq RESTART WITH 1');
@@ -40,7 +48,7 @@ async function resetDatabase() {
     await db.query('ALTER SEQUENCE workflows_id_seq RESTART WITH 1');
     await db.query('ALTER SEQUENCE workflow_states_id_seq RESTART WITH 1');
     await db.query('ALTER SEQUENCE integrations_id_seq RESTART WITH 1');
-    await db.query('ALTER SEQUENCE team_members_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE migrations_id_seq RESTART WITH 1');
 
     console.log('✅ Sequences reset');
     console.log('🎉 Database reset completed successfully!');

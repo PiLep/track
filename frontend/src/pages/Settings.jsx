@@ -28,6 +28,10 @@ function Settings() {
   const [inviteRole, setInviteRole] = useState('member')
   const [inviting, setInviting] = useState(false)
 
+  // Invitations
+  const [invitations, setInvitations] = useState([])
+  const [invitationsLoading, setInvitationsLoading] = useState(false)
+
   useEffect(() => {
     if (currentWorkspace) {
       setWorkspaceData({
@@ -43,6 +47,11 @@ function Settings() {
           prevWorkspaceIdRef.current = currentWorkspace.id
         }
         fetchMembers()
+      }
+
+      // Load invitations to show badge count and when invitations tab is active
+      if (prevWorkspaceIdRef.current !== currentWorkspace.id || activeTab === 'invitations') {
+        fetchInvitations()
       }
     }
   }, [currentWorkspace, activeTab])
@@ -60,6 +69,69 @@ function Settings() {
       console.error('Failed to fetch members:', error)
     } finally {
       setMembersLoading(false)
+    }
+  }
+
+  const fetchInvitations = async () => {
+    if (!currentWorkspace) return
+
+    try {
+      setInvitationsLoading(true)
+      const response = await get(`/api/workspaces/${currentWorkspace.id}/invitations`)
+      if (response.success) {
+        setInvitations(response.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch invitations:', error)
+      setMessage('Failed to fetch invitations')
+    } finally {
+      setInvitationsLoading(false)
+    }
+  }
+
+  const handleCancelInvitation = async (invitationId) => {
+    try {
+      const response = await fetch(`/api/workspaces/invitations/${invitationId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+        },
+      })
+      const data = await response.json()
+
+      if (data.success) {
+        setMessage('Invitation cancelled successfully')
+        // Refresh invitations list
+        await fetchInvitations()
+      } else {
+        setMessage(data.error || 'Failed to cancel invitation')
+      }
+    } catch (error) {
+      console.error('Failed to cancel invitation:', error)
+      setMessage('Error cancelling invitation')
+    }
+  }
+
+  const handleResendInvitation = async (invitationId) => {
+    try {
+      const response = await fetch(`/api/workspaces/invitations/${invitationId}/resend`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+        },
+      })
+      const data = await response.json()
+
+      if (data.success) {
+        setMessage('Invitation resent successfully')
+        // Refresh invitations list
+        await fetchInvitations()
+      } else {
+        setMessage(data.error || 'Failed to resend invitation')
+      }
+    } catch (error) {
+      console.error('Failed to resend invitation:', error)
+      setMessage('Error resending invitation')
     }
   }
 
@@ -116,6 +188,7 @@ function Settings() {
   const tabs = [
     { id: 'workspace', label: 'Workspace', icon: '🏢' },
     { id: 'members', label: 'Members', icon: '👥' },
+    { id: 'invitations', label: 'Invitations', icon: '✉️' },
     { id: 'billing', label: 'Billing', icon: '💳' },
     { id: 'integrations', label: 'Integrations', icon: '🔗' }
   ]
@@ -155,6 +228,19 @@ function Settings() {
               >
                 <span style={{ marginRight: '0.75rem' }}>{tab.icon}</span>
                 {tab.label}
+                {tab.id === 'invitations' && invitations.filter(inv => inv.status === 'pending').length > 0 && (
+                  <span style={{
+                    background: '#ef4444',
+                    color: 'white',
+                    fontSize: '0.75rem',
+                    padding: '0.125rem 0.375rem',
+                    borderRadius: '10px',
+                    marginLeft: '0.5rem',
+                    fontWeight: '600'
+                  }}>
+                    {invitations.filter(inv => inv.status === 'pending').length}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -276,537 +362,699 @@ function Settings() {
             </div>
           )}
 
-           {activeTab === 'members' && (
-             <div>
-               <h2 style={{ margin: '0 0 1.5rem 0', color: '#1e293b', fontSize: '1.5rem' }}>Workspace Members</h2>
+          {activeTab === 'members' && (
+            <div>
+              <h2 style={{ margin: '0 0 1.5rem 0', color: '#1e293b', fontSize: '1.5rem' }}>Workspace Members</h2>
 
-               {/* Invite User Form */}
-               <div style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '8px', marginBottom: '2rem' }}>
-                 <h3 style={{ margin: '0 0 1rem 0', color: '#1e293b', fontSize: '1.1rem' }}>Invite New Member</h3>
-                 <form onSubmit={handleInviteUser} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
-                   <div style={{ flex: 1 }}>
-                     <label style={{ display: 'block', marginBottom: '0.5rem', color: '#374151', fontSize: '0.875rem' }}>
-                       Email Address
-                     </label>
-                     <input
-                       type="email"
-                       value={inviteEmail}
-                       onChange={(e) => setInviteEmail(e.target.value)}
-                       placeholder="user@example.com"
-                       style={{
-                         width: '100%',
-                         padding: '0.75rem',
-                         border: '1px solid #d1d5db',
-                         borderRadius: '6px',
-                         fontSize: '0.875rem'
-                       }}
-                       required
-                     />
-                   </div>
-                   <div>
-                     <label style={{ display: 'block', marginBottom: '0.5rem', color: '#374151', fontSize: '0.875rem' }}>
-                       Role
-                     </label>
-                     <select
-                       value={inviteRole}
-                       onChange={(e) => setInviteRole(e.target.value)}
-                       style={{
-                         padding: '0.75rem',
-                         border: '1px solid #d1d5db',
-                         borderRadius: '6px',
-                         fontSize: '0.875rem',
-                         minWidth: '120px'
-                       }}
-                     >
-                       <option value="member">Member</option>
-                       <option value="admin">Admin</option>
-                     </select>
-                   </div>
-                   <button
-                     type="submit"
-                     disabled={inviting}
-                     style={{
-                       padding: '0.75rem 1.5rem',
-                       background: '#10b981',
-                       color: 'white',
-                       border: 'none',
-                       borderRadius: '6px',
-                       fontSize: '0.875rem',
-                       fontWeight: '500',
-                       cursor: inviting ? 'not-allowed' : 'pointer'
-                     }}
-                   >
-                     {inviting ? 'Inviting...' : 'Invite'}
-                   </button>
-                 </form>
-               </div>
+              {/* Invite User Form */}
+              <div style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '8px', marginBottom: '2rem' }}>
+                <h3 style={{ margin: '0 0 1rem 0', color: '#1e293b', fontSize: '1.1rem' }}>Invite New Member</h3>
+                <form onSubmit={handleInviteUser} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', color: '#374151', fontSize: '0.875rem' }}>
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      placeholder="user@example.com"
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        fontSize: '0.875rem'
+                      }}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', color: '#374151', fontSize: '0.875rem' }}>
+                      Role
+                    </label>
+                    <select
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value)}
+                      style={{
+                        padding: '0.75rem',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        fontSize: '0.875rem',
+                        minWidth: '120px'
+                      }}
+                    >
+                      <option value="member">Member</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={inviting}
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      background: '#10b981',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      fontWeight: '500',
+                      cursor: inviting ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {inviting ? 'Inviting...' : 'Invite'}
+                  </button>
+                </form>
+              </div>
 
-               {/* Members List */}
-               <div>
-                 <h3 style={{ margin: '0 0 1rem 0', color: '#1e293b', fontSize: '1.1rem' }}>
-                   Current Members ({members.length})
-                 </h3>
+              {/* Members List */}
+              <div>
+                <h3 style={{ margin: '0 0 1rem 0', color: '#1e293b', fontSize: '1.1rem' }}>
+                  Current Members ({members.length})
+                </h3>
 
-                 {membersLoading ? (
-                   <p style={{ color: '#64748b' }}>Loading members...</p>
-                 ) : members.length === 0 ? (
-                   <p style={{ color: '#64748b' }}>No members found.</p>
-                 ) : (
-                   <div style={{ display: 'grid', gap: '0.75rem' }}>
-                     {members.map((member) => (
-                       <div key={member.membership_id} style={{
-                         display: 'flex',
-                         alignItems: 'center',
-                         padding: '1rem',
-                         border: '1px solid #e5e7eb',
-                         borderRadius: '8px',
-                         background: 'white'
-                       }}>
-                         <div style={{ position: 'relative', marginRight: '1rem' }}>
-                           <img
-                             src={getAvatarUrl(member.email, member.avatar_url, 40)}
-                             alt="Avatar"
-                             onError={(e) => {
-                               e.target.style.display = 'none';
-                               e.target.nextSibling.style.display = 'flex';
-                             }}
-                             style={{
-                               width: '40px',
-                               height: '40px',
-                               borderRadius: '50%',
-                               objectFit: 'cover'
-                             }}
-                           />
-                           <div
-                             style={{
-                               display: 'none',
-                               position: 'absolute',
-                               top: 0,
-                               left: 0,
-                               width: '40px',
-                               height: '40px',
-                               borderRadius: '50%',
-                               background: '#667eea',
-                               color: 'white',
-                               alignItems: 'center',
-                               justifyContent: 'center',
-                               fontWeight: '600',
-                               fontSize: '1rem'
-                             }}
-                           >
-                             {member.email ? member.email.charAt(0).toUpperCase() : 'U'}
-                           </div>
-                         </div>
-                         <div style={{ flex: 1 }}>
-                           <div style={{ fontWeight: '500', color: '#1e293b' }}>
-                             {member.full_name || member.username || member.email.split('@')[0]}
-                           </div>
-                           <div style={{ color: '#64748b', fontSize: '0.875rem' }}>
-                             {member.email}
-                           </div>
-                         </div>
-                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                           <span style={{
-                             padding: '0.25rem 0.75rem',
-                             borderRadius: '12px',
-                             fontSize: '0.75rem',
-                             fontWeight: '500',
-                             background: member.role === 'owner' ? '#fef3c7' : member.role === 'admin' ? '#dbeafe' : '#f3f4f6',
-                             color: member.role === 'owner' ? '#92400e' : member.role === 'admin' ? '#1e40af' : '#374151'
-                           }}>
-                             {member.role}
-                           </span>
-                           <span style={{ color: '#64748b', fontSize: '0.875rem' }}>
-                             Joined {new Date(member.joined_at).toLocaleDateString()}
-                           </span>
-                         </div>
-                       </div>
-                     ))}
-                   </div>
-                 )}
-               </div>
-             </div>
-           )}
+                {membersLoading ? (
+                  <p style={{ color: '#64748b' }}>Loading members...</p>
+                ) : members.length === 0 ? (
+                  <p style={{ color: '#64748b' }}>No members found.</p>
+                ) : (
+                  <div style={{ display: 'grid', gap: '0.75rem' }}>
+                    {members.map((member) => (
+                      <div key={member.membership_id} style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '1rem',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        background: 'white'
+                      }}>
+                        <div style={{ position: 'relative', marginRight: '1rem' }}>
+                          <img
+                            src={getAvatarUrl(member.email, member.avatar_url, 40)}
+                            alt="Avatar"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              e.target.nextSibling.style.display = 'flex';
+                            }}
+                            style={{
+                              width: '40px',
+                              height: '40px',
+                              borderRadius: '50%',
+                              objectFit: 'cover'
+                            }}
+                          />
+                          <div
+                            style={{
+                              display: 'none',
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '40px',
+                              height: '40px',
+                              borderRadius: '50%',
+                              background: '#667eea',
+                              color: 'white',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: '600',
+                              fontSize: '1rem'
+                            }}
+                          >
+                            {member.email ? member.email.charAt(0).toUpperCase() : 'U'}
+                          </div>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: '500', color: '#1e293b' }}>
+                            {member.full_name || member.username || member.email.split('@')[0]}
+                          </div>
+                          <div style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                            {member.email}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <span style={{
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '12px',
+                            fontSize: '0.75rem',
+                            fontWeight: '500',
+                            background: member.role === 'owner' ? '#fef3c7' : member.role === 'admin' ? '#dbeafe' : '#f3f4f6',
+                            color: member.role === 'owner' ? '#92400e' : member.role === 'admin' ? '#1e40af' : '#374151'
+                          }}>
+                            {member.role}
+                          </span>
+                          <span style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                            Joined {new Date(member.joined_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
-           {activeTab === 'billing' && (
-             <div>
-               <h2 style={{ margin: '0 0 1.5rem 0', color: '#1e293b', fontSize: '1.5rem' }}>Billing & Subscription</h2>
+          {activeTab === 'invitations' && (
+            <div>
+              <h2 style={{ margin: '0 0 1.5rem 0', color: '#1e293b', fontSize: '1.5rem' }}>Invitations en attente</h2>
 
-               {/* Current Plan */}
-               <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb', marginBottom: '2rem' }}>
-                 <h3 style={{ margin: '0 0 1rem 0', color: '#1e293b', fontSize: '1.1rem' }}>Current Plan</h3>
-                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                   <div>
-                     <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1e293b', marginBottom: '0.25rem' }}>
-                       Free Plan
-                     </div>
-                     <div style={{ color: '#64748b', fontSize: '0.875rem' }}>
-                       Perfect for getting started with your team
-                     </div>
-                   </div>
-                   <div style={{ textAlign: 'right' }}>
-                     <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b' }}>
-                       $0
-                     </div>
-                     <div style={{ color: '#64748b', fontSize: '0.875rem' }}>
-                       per month
-                     </div>
-                   </div>
-                 </div>
-                 <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
-                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-                     <div style={{ textAlign: 'center', padding: '1rem', background: '#f8fafc', borderRadius: '6px' }}>
-                       <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#667eea' }}>5</div>
-                       <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Team Members</div>
-                     </div>
-                     <div style={{ textAlign: 'center', padding: '1rem', background: '#f8fafc', borderRadius: '6px' }}>
-                       <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#10b981' }}>100</div>
-                       <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Issues per month</div>
-                     </div>
-                     <div style={{ textAlign: 'center', padding: '1rem', background: '#f8fafc', borderRadius: '6px' }}>
-                       <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#f59e0b' }}>2GB</div>
-                       <div style={{ color: '#64748b', fontSize: '0.875rem' }}>File Storage</div>
-                     </div>
-                   </div>
-                 </div>
-               </div>
+              {invitationsLoading ? (
+                <p style={{ color: '#64748b' }}>Chargement des invitations...</p>
+              ) : invitations.length === 0 ? (
+                <div style={{
+                  background: '#f8fafc',
+                  border: '2px dashed #cbd5e1',
+                  borderRadius: '8px',
+                  padding: '3rem 2rem',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>✉️</div>
+                  <h3 style={{ margin: '0 0 0.5rem 0', color: '#1e293b' }}>Aucune invitation en attente</h3>
+                  <p style={{ color: '#64748b', margin: '0' }}>
+                    Les invitations envoyées apparaîtront ici jusqu'à ce qu'elles soient acceptées.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: '1rem' }}>
+                  {invitations.map((invitation) => {
+                    const isExpired = new Date(invitation.expires_at) < new Date();
+                    const statusColor = invitation.status === 'pending'
+                      ? (isExpired ? '#f59e0b' : '#10b981')
+                      : invitation.status === 'accepted'
+                        ? '#10b981'
+                        : '#ef4444';
 
-               {/* Upgrade Options */}
-               <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb', marginBottom: '2rem' }}>
-                 <h3 style={{ margin: '0 0 1rem 0', color: '#1e293b', fontSize: '1.1rem' }}>Upgrade Your Plan</h3>
-                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
-                   <div style={{ padding: '1.5rem', border: '1px solid #e5e7eb', borderRadius: '8px', background: '#f8fafc' }}>
-                     <h4 style={{ margin: '0 0 0.5rem 0', color: '#1e293b' }}>Pro Plan</h4>
-                     <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.5rem' }}>
-                       $19<span style={{ fontSize: '1rem', fontWeight: '400' }}>/month</span>
-                     </div>
-                     <ul style={{ color: '#64748b', fontSize: '0.875rem', margin: '0 0 1rem 0', paddingLeft: '1.25rem' }}>
-                       <li>Up to 25 team members</li>
-                       <li>Unlimited issues</li>
-                       <li>10GB file storage</li>
-                       <li>Priority support</li>
-                     </ul>
-                     <button
-                       style={{
-                         width: '100%',
-                         padding: '0.75rem',
-                         background: '#667eea',
-                         color: 'white',
-                         border: 'none',
-                         borderRadius: '6px',
-                         fontSize: '0.875rem',
-                         fontWeight: '500',
-                         cursor: 'pointer'
-                       }}
-                     >
-                       Upgrade to Pro
-                     </button>
-                   </div>
+                    return (
+                      <div key={invitation.id} style={{
+                        background: 'white',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        padding: '1.5rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '1rem',
+                            marginBottom: '0.75rem'
+                          }}>
+                            <div>
+                              <div style={{ fontWeight: '600', color: '#1e293b', marginBottom: '0.25rem' }}>
+                                {invitation.email}
+                              </div>
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                fontSize: '0.875rem',
+                                color: '#64748b'
+                              }}>
+                                <span>Rôle: <strong style={{ color: '#1e293b' }}>{invitation.role}</strong></span>
+                                <span>•</span>
+                                <span>Invité par: <strong style={{ color: '#1e293b' }}>{invitation.inviter_name || invitation.inviter_username}</strong></span>
+                              </div>
+                            </div>
+                          </div>
 
-                   <div style={{ padding: '1.5rem', border: '2px solid #667eea', borderRadius: '8px', background: '#f0f4ff', position: 'relative' }}>
-                     <div style={{
-                       position: 'absolute',
-                       top: '-10px',
-                       right: '1rem',
-                       background: '#667eea',
-                       color: 'white',
-                       padding: '0.25rem 0.75rem',
-                       borderRadius: '12px',
-                       fontSize: '0.75rem',
-                       fontWeight: '600'
-                     }}>
-                       Most Popular
-                     </div>
-                     <h4 style={{ margin: '0 0 0.5rem 0', color: '#1e293b' }}>Enterprise Plan</h4>
-                     <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.5rem' }}>
-                       $49<span style={{ fontSize: '1rem', fontWeight: '400' }}>/month</span>
-                     </div>
-                     <ul style={{ color: '#64748b', fontSize: '0.875rem', margin: '0 0 1rem 0', paddingLeft: '1.25rem' }}>
-                       <li>Unlimited team members</li>
-                       <li>Unlimited issues</li>
-                       <li>100GB file storage</li>
-                       <li>24/7 phone support</li>
-                       <li>Custom integrations</li>
-                     </ul>
-                     <button
-                       style={{
-                         width: '100%',
-                         padding: '0.75rem',
-                         background: '#667eea',
-                         color: 'white',
-                         border: 'none',
-                         borderRadius: '6px',
-                         fontSize: '0.875rem',
-                         fontWeight: '500',
-                         cursor: 'pointer'
-                       }}
-                     >
-                       Upgrade to Enterprise
-                     </button>
-                   </div>
-                 </div>
-               </div>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '1rem',
+                            fontSize: '0.875rem'
+                          }}>
+                            <span style={{
+                              background: statusColor + '20',
+                              color: statusColor,
+                              padding: '0.25rem 0.75rem',
+                              borderRadius: '12px',
+                              fontWeight: '500',
+                              fontSize: '0.75rem'
+                            }}>
+                              {invitation.status === 'pending'
+                                ? (isExpired ? 'Expirée' : 'En attente')
+                                : invitation.status === 'accepted'
+                                  ? 'Acceptée'
+                                  : 'Annulée'
+                              }
+                            </span>
+                            <span style={{ color: '#64748b' }}>
+                              Envoyée le {new Date(invitation.created_at).toLocaleDateString('fr-FR')}
+                            </span>
+                            {invitation.status === 'pending' && (
+                              <span style={{ color: '#64748b' }}>
+                                Expire le {new Date(invitation.expires_at).toLocaleDateString('fr-FR')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
 
-               {/* Billing History */}
-               <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                 <h3 style={{ margin: '0 0 1rem 0', color: '#1e293b', fontSize: '1.1rem' }}>Billing History</h3>
-                 <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
-                   No billing history available. Upgrade your plan to start using premium features.
-                 </p>
-               </div>
-             </div>
-           )}
+                        {invitation.status === 'pending' && (
+                          <div style={{ display: 'flex', gap: '0.5rem', marginLeft: '1rem' }}>
+                            <button
+                              onClick={() => handleResendInvitation(invitation.id)}
+                              style={{
+                                padding: '0.5rem 1rem',
+                                background: '#667eea',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontSize: '0.875rem',
+                                cursor: 'pointer',
+                                fontWeight: '500'
+                              }}
+                            >
+                              Renvoyer
+                            </button>
+                            <button
+                              onClick={() => handleCancelInvitation(invitation.id)}
+                              style={{
+                                padding: '0.5rem 1rem',
+                                background: 'transparent',
+                                color: '#ef4444',
+                                border: '1px solid #ef4444',
+                                borderRadius: '6px',
+                                fontSize: '0.875rem',
+                                cursor: 'pointer',
+                                fontWeight: '500'
+                              }}
+                            >
+                              Annuler
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
 
-           {activeTab === 'integrations' && (
-             <div>
-               <h2 style={{ margin: '0 0 1.5rem 0', color: '#1e293b', fontSize: '1.5rem' }}>Integrations</h2>
-               <p style={{ color: '#64748b', marginBottom: '2rem' }}>
-                 Connect your favorite tools and services to streamline your workflow.
-               </p>
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '1rem',
+                marginTop: '2rem'
+              }}>
+                <h4 style={{ margin: '0 0 0.5rem 0', color: '#1e293b', fontSize: '0.9rem' }}>
+                  💡 À propos des invitations
+                </h4>
+                <ul style={{
+                  color: '#64748b',
+                  fontSize: '0.875rem',
+                  margin: '0',
+                  paddingLeft: '1.25rem',
+                  lineHeight: '1.6'
+                }}>
+                  <li>Les invitations expirent automatiquement après 72 heures</li>
+                  <li>Vous pouvez renvoyer une invitation pour réinitialiser le délai d'expiration</li>
+                  <li>Les utilisateurs invités recevront un email avec un lien d'onboarding Track</li>
+                </ul>
+              </div>
+            </div>
+          )}
 
-               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
-                 {/* Slack Integration */}
-                 <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
-                     <div style={{
-                       width: '40px',
-                       height: '40px',
-                       background: '#4a154b',
-                       borderRadius: '8px',
-                       display: 'flex',
-                       alignItems: 'center',
-                       justifyContent: 'center',
-                       marginRight: '1rem',
-                       fontSize: '1.25rem'
-                     }}>
-                       💬
-                     </div>
-                     <div>
-                       <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>Slack</h4>
-                       <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
-                         Get notifications in Slack channels
-                       </p>
-                     </div>
-                   </div>
-                   <button
-                     style={{
-                       width: '100%',
-                       padding: '0.75rem',
-                       background: '#4a154b',
-                       color: 'white',
-                       border: 'none',
-                       borderRadius: '6px',
-                       fontSize: '0.875rem',
-                       fontWeight: '500',
-                       cursor: 'pointer'
-                     }}
-                   >
-                     Connect Slack
-                   </button>
-                 </div>
+          {activeTab === 'billing' && (
+            <div>
+              <h2 style={{ margin: '0 0 1.5rem 0', color: '#1e293b', fontSize: '1.5rem' }}>Billing & Subscription</h2>
 
-                 {/* GitHub Integration */}
-                 <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
-                     <div style={{
-                       width: '40px',
-                       height: '40px',
-                       background: '#24292e',
-                       borderRadius: '8px',
-                       display: 'flex',
-                       alignItems: 'center',
-                       justifyContent: 'center',
-                       marginRight: '1rem',
-                       fontSize: '1.25rem'
-                     }}>
-                       🐙
-                     </div>
-                     <div>
-                       <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>GitHub</h4>
-                       <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
-                         Link issues to GitHub pull requests
-                       </p>
-                     </div>
-                   </div>
-                   <button
-                     style={{
-                       width: '100%',
-                       padding: '0.75rem',
-                       background: '#24292e',
-                       color: 'white',
-                       border: 'none',
-                       borderRadius: '6px',
-                       fontSize: '0.875rem',
-                       fontWeight: '500',
-                       cursor: 'pointer'
-                     }}
-                   >
-                     Connect GitHub
-                   </button>
-                 </div>
+              {/* Current Plan */}
+              <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb', marginBottom: '2rem' }}>
+                <h3 style={{ margin: '0 0 1rem 0', color: '#1e293b', fontSize: '1.1rem' }}>Current Plan</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1e293b', marginBottom: '0.25rem' }}>
+                      Free Plan
+                    </div>
+                    <div style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                      Perfect for getting started with your team
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b' }}>
+                      $0
+                    </div>
+                    <div style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                      per month
+                    </div>
+                  </div>
+                </div>
+                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                    <div style={{ textAlign: 'center', padding: '1rem', background: '#f8fafc', borderRadius: '6px' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#667eea' }}>5</div>
+                      <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Team Members</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: '1rem', background: '#f8fafc', borderRadius: '6px' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#10b981' }}>100</div>
+                      <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Issues per month</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: '1rem', background: '#f8fafc', borderRadius: '6px' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#f59e0b' }}>2GB</div>
+                      <div style={{ color: '#64748b', fontSize: '0.875rem' }}>File Storage</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-                 {/* Google Drive Integration */}
-                 <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
-                     <div style={{
-                       width: '40px',
-                       height: '40px',
-                       background: '#4285f4',
-                       borderRadius: '8px',
-                       display: 'flex',
-                       alignItems: 'center',
-                       justifyContent: 'center',
-                       marginRight: '1rem',
-                       fontSize: '1.25rem'
-                     }}>
-                       📁
-                     </div>
-                     <div>
-                       <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>Google Drive</h4>
-                       <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
-                         Attach files from Google Drive
-                       </p>
-                     </div>
-                   </div>
-                   <button
-                     style={{
-                       width: '100%',
-                       padding: '0.75rem',
-                       background: '#4285f4',
-                       color: 'white',
-                       border: 'none',
-                       borderRadius: '6px',
-                       fontSize: '0.875rem',
-                       fontWeight: '500',
-                       cursor: 'pointer'
-                     }}
-                   >
-                     Connect Drive
-                   </button>
-                 </div>
+              {/* Upgrade Options */}
+              <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb', marginBottom: '2rem' }}>
+                <h3 style={{ margin: '0 0 1rem 0', color: '#1e293b', fontSize: '1.1rem' }}>Upgrade Your Plan</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
+                  <div style={{ padding: '1.5rem', border: '1px solid #e5e7eb', borderRadius: '8px', background: '#f8fafc' }}>
+                    <h4 style={{ margin: '0 0 0.5rem 0', color: '#1e293b' }}>Pro Plan</h4>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.5rem' }}>
+                      $19<span style={{ fontSize: '1rem', fontWeight: '400' }}>/month</span>
+                    </div>
+                    <ul style={{ color: '#64748b', fontSize: '0.875rem', margin: '0 0 1rem 0', paddingLeft: '1.25rem' }}>
+                      <li>Up to 25 team members</li>
+                      <li>Unlimited issues</li>
+                      <li>10GB file storage</li>
+                      <li>Priority support</li>
+                    </ul>
+                    <button
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        background: '#667eea',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '0.875rem',
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Upgrade to Pro
+                    </button>
+                  </div>
 
-                 {/* Zapier Integration */}
-                 <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
-                     <div style={{
-                       width: '40px',
-                       height: '40px',
-                       background: '#ff4a00',
-                       borderRadius: '8px',
-                       display: 'flex',
-                       alignItems: 'center',
-                       justifyContent: 'center',
-                       marginRight: '1rem',
-                       fontSize: '1.25rem'
-                     }}>
-                       ⚡
-                     </div>
-                     <div>
-                       <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>Zapier</h4>
-                       <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
-                         Automate workflows with 2,000+ apps
-                       </p>
-                     </div>
-                   </div>
-                   <button
-                     style={{
-                       width: '100%',
-                       padding: '0.75rem',
-                       background: '#ff4a00',
-                       color: 'white',
-                       border: 'none',
-                       borderRadius: '6px',
-                       fontSize: '0.875rem',
-                       fontWeight: '500',
-                       cursor: 'pointer'
-                     }}
-                   >
-                     Connect Zapier
-                   </button>
-                 </div>
+                  <div style={{ padding: '1.5rem', border: '2px solid #667eea', borderRadius: '8px', background: '#f0f4ff', position: 'relative' }}>
+                    <div style={{
+                      position: 'absolute',
+                      top: '-10px',
+                      right: '1rem',
+                      background: '#667eea',
+                      color: 'white',
+                      padding: '0.25rem 0.75rem',
+                      borderRadius: '12px',
+                      fontSize: '0.75rem',
+                      fontWeight: '600'
+                    }}>
+                      Most Popular
+                    </div>
+                    <h4 style={{ margin: '0 0 0.5rem 0', color: '#1e293b' }}>Enterprise Plan</h4>
+                    <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.5rem' }}>
+                      $49<span style={{ fontSize: '1rem', fontWeight: '400' }}>/month</span>
+                    </div>
+                    <ul style={{ color: '#64748b', fontSize: '0.875rem', margin: '0 0 1rem 0', paddingLeft: '1.25rem' }}>
+                      <li>Unlimited team members</li>
+                      <li>Unlimited issues</li>
+                      <li>100GB file storage</li>
+                      <li>24/7 phone support</li>
+                      <li>Custom integrations</li>
+                    </ul>
+                    <button
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        background: '#667eea',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '0.875rem',
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Upgrade to Enterprise
+                    </button>
+                  </div>
+                </div>
+              </div>
 
-                 {/* Webhook Integration */}
-                 <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
-                     <div style={{
-                       width: '40px',
-                       height: '40px',
-                       background: '#10b981',
-                       borderRadius: '8px',
-                       display: 'flex',
-                       alignItems: 'center',
-                       justifyContent: 'center',
-                       marginRight: '1rem',
-                       fontSize: '1.25rem'
-                     }}>
-                       🔗
-                     </div>
-                     <div>
-                       <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>Webhooks</h4>
-                       <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
-                         Send real-time updates to your servers
-                       </p>
-                     </div>
-                   </div>
-                   <button
-                     style={{
-                       width: '100%',
-                       padding: '0.75rem',
-                       background: '#10b981',
-                       color: 'white',
-                       border: 'none',
-                       borderRadius: '6px',
-                       fontSize: '0.875rem',
-                       fontWeight: '500',
-                       cursor: 'pointer'
-                     }}
-                   >
-                     Configure Webhooks
-                   </button>
-                 </div>
+              {/* Billing History */}
+              <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                <h3 style={{ margin: '0 0 1rem 0', color: '#1e293b', fontSize: '1.1rem' }}>Billing History</h3>
+                <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                  No billing history available. Upgrade your plan to start using premium features.
+                </p>
+              </div>
+            </div>
+          )}
 
-                 {/* API Integration */}
-                 <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                   <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
-                     <div style={{
-                       width: '40px',
-                       height: '40px',
-                       background: '#667eea',
-                       borderRadius: '8px',
-                       display: 'flex',
-                       alignItems: 'center',
-                       justifyContent: 'center',
-                       marginRight: '1rem',
-                       fontSize: '1.25rem'
-                     }}>
-                       🔧
-                     </div>
-                     <div>
-                       <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>API Access</h4>
-                       <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
-                         Build custom integrations with our API
-                       </p>
-                     </div>
-                   </div>
-                   <button
-                     style={{
-                       width: '100%',
-                       padding: '0.75rem',
-                       background: '#667eea',
-                       color: 'white',
-                       border: 'none',
-                       borderRadius: '6px',
-                       fontSize: '0.875rem',
-                       fontWeight: '500',
-                       cursor: 'pointer'
-                     }}
-                   >
-                     Get API Key
-                   </button>
-                 </div>
-               </div>
-             </div>
-           )}
+          {activeTab === 'integrations' && (
+            <div>
+              <h2 style={{ margin: '0 0 1.5rem 0', color: '#1e293b', fontSize: '1.5rem' }}>Integrations</h2>
+              <p style={{ color: '#64748b', marginBottom: '2rem' }}>
+                Connect your favorite tools and services to streamline your workflow.
+              </p>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
+                {/* Slack Integration */}
+                <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      background: '#4a154b',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: '1rem',
+                      fontSize: '1.25rem'
+                    }}>
+                      💬
+                    </div>
+                    <div>
+                      <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>Slack</h4>
+                      <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
+                        Get notifications in Slack channels
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      background: '#4a154b',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      fontWeight: '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Connect Slack
+                  </button>
+                </div>
+
+                {/* GitHub Integration */}
+                <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      background: '#24292e',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: '1rem',
+                      fontSize: '1.25rem'
+                    }}>
+                      🐙
+                    </div>
+                    <div>
+                      <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>GitHub</h4>
+                      <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
+                        Link issues to GitHub pull requests
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      background: '#24292e',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      fontWeight: '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Connect GitHub
+                  </button>
+                </div>
+
+                {/* Google Drive Integration */}
+                <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      background: '#4285f4',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: '1rem',
+                      fontSize: '1.25rem'
+                    }}>
+                      📁
+                    </div>
+                    <div>
+                      <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>Google Drive</h4>
+                      <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
+                        Attach files from Google Drive
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      background: '#4285f4',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      fontWeight: '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Connect Drive
+                  </button>
+                </div>
+
+                {/* Zapier Integration */}
+                <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      background: '#ff4a00',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: '1rem',
+                      fontSize: '1.25rem'
+                    }}>
+                      ⚡
+                    </div>
+                    <div>
+                      <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>Zapier</h4>
+                      <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
+                        Automate workflows with 2,000+ apps
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      background: '#ff4a00',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      fontWeight: '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Connect Zapier
+                  </button>
+                </div>
+
+                {/* Webhook Integration */}
+                <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      background: '#10b981',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: '1rem',
+                      fontSize: '1.25rem'
+                    }}>
+                      🔗
+                    </div>
+                    <div>
+                      <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>Webhooks</h4>
+                      <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
+                        Send real-time updates to your servers
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      background: '#10b981',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      fontWeight: '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Configure Webhooks
+                  </button>
+                </div>
+
+                {/* API Integration */}
+                <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      background: '#667eea',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: '1rem',
+                      fontSize: '1.25rem'
+                    }}>
+                      🔧
+                    </div>
+                    <div>
+                      <h4 style={{ margin: '0 0 0.25rem 0', color: '#1e293b' }}>API Access</h4>
+                      <p style={{ margin: '0', color: '#64748b', fontSize: '0.875rem' }}>
+                        Build custom integrations with our API
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      background: '#667eea',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '0.875rem',
+                      fontWeight: '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Get API Key
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>

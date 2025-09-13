@@ -46,9 +46,21 @@ const issuesRouter = require('./routes/issues');
 const usersRouter = require('./routes/users');
 const projectsRouter = require('./routes/projects');
 const teamsRouter = require('./routes/teams');
+const invitationsRouter = require('./routes/invitations');
 
 app.get('/', (req, res) => {
   res.json({ message: 'SaaS Backend API' });
+});
+
+// Test endpoint simple d'authentification
+const { authenticate } = require('./middleware/auth');
+app.get('/test-auth', authenticate, (req, res) => {
+  console.log('✅ Test auth endpoint reached, user:', req.user.id);
+  res.json({ 
+    success: true, 
+    message: 'Authentication works!', 
+    user: req.user 
+  });
 });
 
 // API routes
@@ -58,6 +70,7 @@ app.use('/api/issues', issuesRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/projects', projectsRouter);
 app.use('/api/teams', teamsRouter);
+app.use('/api/invitations', invitationsRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

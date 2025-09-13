@@ -169,6 +169,20 @@ CREATE TABLE integrations (
     CONSTRAINT chk_integration_scope CHECK (project_id IS NOT NULL OR team_id IS NOT NULL)
 );
 
+-- Invitations table (for workspace invitations with tokens)
+CREATE TABLE invitations (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) NOT NULL,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    invited_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role VARCHAR(50) DEFAULT 'member',
+    token VARCHAR(255) UNIQUE NOT NULL,
+    status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'accepted', 'expired'
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    accepted_at TIMESTAMP WITH TIME ZONE
+);
+
 -- Indexes for performance
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
@@ -203,3 +217,7 @@ CREATE INDEX idx_integrations_workspace_id ON integrations(workspace_id);
 CREATE INDEX idx_integrations_project_id ON integrations(project_id);
 CREATE INDEX idx_integrations_team_id ON integrations(team_id);
 CREATE INDEX idx_integrations_created_by ON integrations(created_by);
+CREATE INDEX idx_invitations_email ON invitations(email);
+CREATE INDEX idx_invitations_workspace_id ON invitations(workspace_id);
+CREATE INDEX idx_invitations_token ON invitations(token);
+CREATE INDEX idx_invitations_status ON invitations(status);

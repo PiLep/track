@@ -1,5 +1,4 @@
 version: '3.8'
-
 services:
   postgres:
     image: postgres:15
@@ -14,10 +13,30 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d saas_app"]
+      test: [ "CMD-SHELL", "pg_isready -U user -d saas_app" ]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  postgres-test:
+    image: postgres:15
+    container_name: saas-postgres-test
+    environment:
+      POSTGRES_DB: saas_app_test
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U user -d saas_app_test" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - test
 
   backend:
     build:
@@ -28,9 +47,16 @@ services:
       - "3001:3001"
     environment:
       - DATABASE_URL=postgresql://user:password@postgres:5432/saas_app
-      - JWT_SECRET=your_jwt_secret_here
+      - JWT_SECRET=development_jwt_secret_key_change_in_production
       - JWT_EXPIRES_IN=1h
+      - JWT_REMEMBER_EXPIRES_IN=30d
       - PORT=3001
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_SECURE=false
+      - SMTP_USER=
+      - SMTP_PASS=
+      - EMAIL_FROM=noreply@saas-app.com
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,6 +64,35 @@ services:
       - ./backend:/app
       - /app/node_modules
     command: npm run dev
+
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: saas-backend-test
+    ports:
+      - "3002:3001"
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres-test:5432/saas_app_test
+      - JWT_SECRET=test_jwt_secret_key_for_testing_only
+      - JWT_EXPIRES_IN=1h
+      - JWT_REMEMBER_EXPIRES_IN=30d
+      - PORT=3001
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_SECURE=false
+      - SMTP_USER=
+      - SMTP_PASS=
+      - EMAIL_FROM=noreply@saas-app.com
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    command: npm run dev
+    profiles:
+      - test
 
   frontend:
     build:
@@ -51,5 +106,32 @@ services:
       - /app/node_modules
     command: npm run dev
 
+  frontend-test:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: saas-frontend-test
+    ports:
+      - "5174:5173"
+    environment:
+      - VITE_API_BASE=http://localhost:3002
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev
+    profiles:
+      - test
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: saas-mailpit
+    ports:
+      - "8025:8025" # Interface web
+      - "1025:1025" # SMTP server
+    environment:
+      - MP_SMTP_AUTH_ACCEPT_ANY=1
+      - MP_SMTP_AUTH_ALLOW_INSECURE=1
+
 volumes:
   postgres_data:
+  postgres_test_data:

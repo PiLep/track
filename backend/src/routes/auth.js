@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
+const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -42,7 +43,19 @@ router.post('/register', async (req, res) => {
     // Generate avatar URL
     const avatar_url = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${username}&size=80`;
 
-    // Create workspace first (we'll update owner_id after creating user)
+    // Create user first (without default workspace initially)
+    const insertQuery = `
+      INSERT INTO users (email, username, full_name, password_hash, avatar_url, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, email, username, full_name, avatar_url, created_at
+    `;
+
+    const values = [email, username, full_name || username, password_hash, avatar_url, new Date(), new Date()];
+    const result = await db.query(insertQuery, values);
+
+    const user = result.rows[0];
+
+    // Now create workspace with proper owner_id
     const workspaceQuery = `
       INSERT INTO workspaces (name, description, owner_id, created_at, updated_at)
       VALUES ($1, $2, $3, $4, $5)
@@ -50,27 +63,15 @@ router.post('/register', async (req, res) => {
     `;
 
     const workspaceName = `${full_name || username}'s Workspace`;
-    const workspaceValues = [workspaceName, `Personal workspace for ${full_name || username}`, null, new Date(), new Date()];
+    const workspaceValues = [workspaceName, `Personal workspace for ${full_name || username}`, user.id, new Date(), new Date()];
     const workspaceResult = await db.query(workspaceQuery, workspaceValues);
     const workspaceId = workspaceResult.rows[0].id;
 
-    // Create user with default workspace
-    const insertQuery = `
-      INSERT INTO users (email, username, full_name, password_hash, avatar_url, default_workspace_id, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, email, username, full_name, avatar_url, default_workspace_id, created_at
+    // Update user with default workspace
+    const updateUserQuery = `
+      UPDATE users SET default_workspace_id = $1 WHERE id = $2
     `;
-
-    const values = [email, username, full_name || username, password_hash, avatar_url, workspaceId, new Date(), new Date()];
-    const result = await db.query(insertQuery, values);
-
-    const user = result.rows[0];
-
-    // Update workspace owner_id
-    const updateWorkspaceQuery = `
-      UPDATE workspaces SET owner_id = $1 WHERE id = $2
-    `;
-    await db.query(updateWorkspaceQuery, [user.id, workspaceId]);
+    await db.query(updateUserQuery, [workspaceId, user.id]);
 
     // Add user as owner member of workspace
     const memberQuery = `
@@ -86,9 +87,15 @@ router.post('/register', async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
     );
 
+    // Include default_workspace_id in user object
+    const userWithWorkspace = {
+      ...user,
+      default_workspace_id: workspaceId
+    };
+
     res.status(201).json({
       success: true,
-      data: { user, token }
+      data: { user: userWithWorkspace, token }
     });
   } catch (error) {
     console.error('Error registering user:', error);
@@ -102,7 +109,7 @@ router.post('/register', async (req, res) => {
 // Login
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, remember_me = false } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
@@ -133,11 +140,18 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Generate JWT
+    // Generate JWT with different expiration based on remember_me
+    const expiresIn = remember_me 
+      ? process.env.JWT_REMEMBER_EXPIRES_IN || '30d'  // Long-term token
+      : process.env.JWT_EXPIRES_IN || '1h';           // Short-term token
+    
     const token = jwt.sign(
-      { userId: user.id },
+      { 
+        userId: user.id,
+        remember_me: remember_me 
+      },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+      { expiresIn }
     );
 
     // Return user data without password hash
@@ -165,31 +179,11 @@ router.post('/login', async (req, res) => {
 });
 
 // Get current user (protected route)
-router.get('/me', async (req, res) => {
+router.get('/me', authenticate, async (req, res) => {
   try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'No token provided'
-      });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userQuery = 'SELECT id, email, username, full_name, avatar_url, created_at, updated_at FROM users WHERE id = $1';
-    const userResult = await db.query(userQuery, [decoded.userId]);
-
-    if (userResult.rows.length === 0) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid token'
-      });
-    }
-
     res.json({
       success: true,
-      data: { user: userResult.rows[0] }
+      data: { user: req.user }
     });
   } catch (error) {
     console.error('Error getting current user:', error);

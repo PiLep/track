@@ -1,41 +1,18 @@
 const express = require('express');
-const db = require('../config/database');
+const workspaceService = require('../services/workspaceService');
+const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
 // GET /api/workspaces - Get user's workspaces
-router.get('/', async (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
-    // Get user from JWT token
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'No token provided'
-      });
-    }
-
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.userId;
-
-    // Get workspaces where user is a member
-    const query = `
-      SELECT
-        w.*,
-        wm.role as user_role,
-        wm.joined_at as joined_at
-      FROM workspaces w
-      JOIN workspace_members wm ON w.id = wm.workspace_id
-      WHERE wm.user_id = $1
-      ORDER BY w.created_at DESC
-    `;
-
-    const result = await db.query(query, [userId]);
+    const userId = req.user.id;
+    const workspaces = await workspaceService.getUserWorkspaces(userId);
 
     res.json({
       success: true,
-      data: result.rows
+      data: workspaces
     });
   } catch (error) {
     console.error('Error fetching workspaces:', error);
@@ -47,62 +24,32 @@ router.get('/', async (req, res) => {
 });
 
 // PUT /api/workspaces/:id - Update workspace settings
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticate, async (req, res) => {
   try {
     const workspaceId = parseInt(req.params.id);
-    const { name, description, domain_name, require_domain_membership } = req.body;
+    const userId = req.user.id;
+    const workspaceData = req.body;
 
-    // Get user from JWT token
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'No token provided'
-      });
-    }
-
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.userId;
-
-    // Check if user has permission to update (owner or admin)
-    const permissionQuery = `
-      SELECT role FROM workspace_members
-      WHERE workspace_id = $1 AND user_id = $2 AND role IN ('owner', 'admin')
-    `;
-
-    const permissionResult = await db.query(permissionQuery, [workspaceId, userId]);
-    if (permissionResult.rows.length === 0) {
-      return res.status(403).json({
-        success: false,
-        error: 'Insufficient permissions to update workspace'
-      });
-    }
-
-    // Update workspace
-    const updateQuery = `
-      UPDATE workspaces
-      SET name = $1, description = $2, domain_name = $3, require_domain_membership = $4, updated_at = $5
-      WHERE id = $6
-      RETURNING id, name, description, domain_name, require_domain_membership, owner_id, created_at, updated_at
-    `;
-
-    const values = [name, description, domain_name, require_domain_membership, new Date(), workspaceId];
-    const result = await db.query(updateQuery, values);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Workspace not found'
-      });
-    }
+    const updatedWorkspace = await workspaceService.updateWorkspace(workspaceId, userId, workspaceData);
 
     res.json({
       success: true,
-      data: result.rows[0]
+      data: updatedWorkspace
     });
   } catch (error) {
     console.error('Error updating workspace:', error);
+    if (error.message === 'Insufficient permissions to update workspace') {
+      return res.status(403).json({
+        success: false,
+        error: error.message
+      });
+    }
+    if (error.message === 'Workspace not found') {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
     res.status(500).json({
       success: false,
       error: 'Failed to update workspace'
@@ -111,65 +58,25 @@ router.put('/:id', async (req, res) => {
 });
 
 // POST /api/workspaces - Create new workspace
-router.post('/', async (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const userId = req.user.id;
+    const workspaceData = req.body;
 
-    if (!name) {
-      return res.status(400).json({
-        success: false,
-        error: 'Workspace name is required'
-      });
-    }
-
-    // Get user from JWT token
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'No token provided'
-      });
-    }
-
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.userId;
-
-    // Create workspace
-    const workspaceQuery = `
-      INSERT INTO workspaces (name, description, owner_id, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, name, description, owner_id, created_at
-    `;
-
-    const workspaceValues = [name, description, userId, new Date(), new Date()];
-    const workspaceResult = await db.query(workspaceQuery, workspaceValues);
-    const workspace = workspaceResult.rows[0];
-
-    // Add creator as owner member
-    const memberQuery = `
-      INSERT INTO workspace_members (workspace_id, user_id, role, joined_at)
-      VALUES ($1, $2, $3, $4)
-    `;
-
-    await db.query(memberQuery, [workspace.id, userId, 'owner', new Date()]);
-
-    // Set as default workspace for user
-    const updateUserQuery = `
-      UPDATE users SET default_workspace_id = $1 WHERE id = $2
-    `;
-    await db.query(updateUserQuery, [workspace.id, userId]);
+    const newWorkspace = await workspaceService.createWorkspace(userId, workspaceData);
 
     res.status(201).json({
       success: true,
-      data: {
-        ...workspace,
-        user_role: 'owner',
-        joined_at: new Date()
-      }
+      data: newWorkspace
     });
   } catch (error) {
     console.error('Error creating workspace:', error);
+    if (error.message === 'Workspace name is required') {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
+    }
     res.status(500).json({
       success: false,
       error: 'Failed to create workspace'
@@ -178,7 +85,7 @@ router.post('/', async (req, res) => {
 });
 
 // POST /api/workspaces/:id/invite - Invite user to workspace
-router.post('/:id/invite', async (req, res) => {
+router.post('/:id/invite', authenticate, async (req, res) => {
   try {
     const workspaceId = parseInt(req.params.id);
     const { email, role = 'member' } = req.body;
@@ -190,84 +97,39 @@ router.post('/:id/invite', async (req, res) => {
       });
     }
 
-    // Get user from JWT token
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'No token provided'
+    const userId = req.user.id;
+    const result = await workspaceService.inviteUserToWorkspace(workspaceId, userId, email, role);
+
+    if (result.data) {
+      res.status(201).json({
+        success: true,
+        data: result.data
       });
-    }
-
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.userId;
-
-    // Check if user has permission to invite (owner or admin)
-    const permissionQuery = `
-      SELECT role FROM workspace_members
-      WHERE workspace_id = $1 AND user_id = $2 AND role IN ('owner', 'admin')
-    `;
-
-    const permissionResult = await db.query(permissionQuery, [workspaceId, userId]);
-    if (permissionResult.rows.length === 0) {
-      return res.status(403).json({
-        success: false,
-        error: 'Insufficient permissions to invite users'
-      });
-    }
-
-    // Check if invited user exists
-    const invitedUserQuery = 'SELECT id, email FROM users WHERE email = $1';
-    const invitedUserResult = await db.query(invitedUserQuery, [email]);
-
-    if (invitedUserResult.rows.length === 0) {
-      // User doesn't exist - in a real app, you'd send an email invitation
-      // For now, we'll just return that an invitation was sent
-      return res.json({
+    } else {
+      res.json({
         success: true,
         data: {
-          message: 'Invitation sent to new user',
-          email: email,
-          status: 'pending'
+          message: result.message,
+          email: result.email,
+          status: result.status,
+          workspace_name: result.workspace_name
         }
       });
     }
-
-    const invitedUser = invitedUserResult.rows[0];
-
-    // Check if user is already a member
-    const existingMemberQuery = `
-      SELECT id FROM workspace_members WHERE workspace_id = $1 AND user_id = $2
-    `;
-    const existingMemberResult = await db.query(existingMemberQuery, [workspaceId, invitedUser.id]);
-
-    if (existingMemberResult.rows.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'User is already a member of this workspace'
-      });
-    }
-
-    // Add user to workspace
-    const memberQuery = `
-      INSERT INTO workspace_members (workspace_id, user_id, role, joined_at)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, workspace_id, user_id, role, joined_at
-    `;
-
-    const memberResult = await db.query(memberQuery, [workspaceId, invitedUser.id, role, new Date()]);
-
-    res.status(201).json({
-      success: true,
-      data: {
-        ...memberResult.rows[0],
-        user_email: invitedUser.email,
-        message: 'User added to workspace'
-      }
-    });
   } catch (error) {
     console.error('Error inviting user to workspace:', error);
+    if (error.message === 'Insufficient permissions to invite users') {
+      return res.status(403).json({
+        success: false,
+        error: error.message
+      });
+    }
+    if (error.message === 'L\'utilisateur est déjà membre de ce workspace') {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
+    }
     res.status(500).json({
       success: false,
       error: 'Failed to invite user'
@@ -276,66 +138,123 @@ router.post('/:id/invite', async (req, res) => {
 });
 
 // GET /api/workspaces/:id/members - Get workspace members
-router.get('/:id/members', async (req, res) => {
+router.get('/:id/members', authenticate, async (req, res) => {
   try {
     const workspaceId = parseInt(req.params.id);
+    const userId = req.user.id;
 
-    // Get user from JWT token
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: 'No token provided'
-      });
-    }
-
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.userId;
-
-    // Check if user is a member of the workspace
-    const memberCheckQuery = `
-      SELECT role FROM workspace_members
-      WHERE workspace_id = $1 AND user_id = $2
-    `;
-
-    const memberCheckResult = await db.query(memberCheckQuery, [workspaceId, userId]);
-    if (memberCheckResult.rows.length === 0) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied to workspace members'
-      });
-    }
-
-    // Get workspace members with user details
-    const membersQuery = `
-      SELECT
-        wm.id as membership_id,
-        wm.role,
-        wm.joined_at,
-        u.id,
-        u.email,
-        u.username,
-        u.full_name,
-        u.avatar_url,
-        u.created_at as user_created_at
-      FROM workspace_members wm
-      JOIN users u ON wm.user_id = u.id
-      WHERE wm.workspace_id = $1
-      ORDER BY wm.joined_at ASC
-    `;
-
-    const membersResult = await db.query(membersQuery, [workspaceId]);
+    const members = await workspaceService.getWorkspaceMembers(workspaceId, userId);
 
     res.json({
       success: true,
-      data: membersResult.rows
+      data: members
     });
   } catch (error) {
     console.error('Error fetching workspace members:', error);
+    if (error.message === 'Access denied to workspace members') {
+      return res.status(403).json({
+        success: false,
+        error: error.message
+      });
+    }
     res.status(500).json({
       success: false,
       error: 'Failed to fetch workspace members'
+    });
+  }
+});
+
+// GET /api/workspaces/:id/invitations - Get workspace invitations
+router.get('/:id/invitations', authenticate, async (req, res) => {
+  try {
+    const workspaceId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    const invitations = await workspaceService.getWorkspaceInvitations(workspaceId, userId);
+
+    res.json({
+      success: true,
+      data: invitations
+    });
+  } catch (error) {
+    console.error('Error fetching workspace invitations:', error);
+    if (error.message === 'Insufficient permissions to view invitations') {
+      return res.status(403).json({
+        success: false,
+        error: error.message
+      });
+    }
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch workspace invitations'
+    });
+  }
+});
+
+// DELETE /api/workspaces/invitations/:id - Cancel an invitation
+router.delete('/invitations/:id', authenticate, async (req, res) => {
+  try {
+    const invitationId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    const cancelledInvitation = await workspaceService.cancelInvitation(invitationId, userId);
+
+    res.json({
+      success: true,
+      data: cancelledInvitation,
+      message: 'Invitation cancelled successfully'
+    });
+  } catch (error) {
+    console.error('Error cancelling invitation:', error);
+    if (error.message === 'Insufficient permissions to cancel invitations') {
+      return res.status(403).json({
+        success: false,
+        error: error.message
+      });
+    }
+    if (error.message === 'Invitation not found or already processed') {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
+    res.status(500).json({
+      success: false,
+      error: 'Failed to cancel invitation'
+    });
+  }
+});
+
+// POST /api/workspaces/invitations/:id/resend - Resend an invitation
+router.post('/invitations/:id/resend', authenticate, async (req, res) => {
+  try {
+    const invitationId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    const resentInvitation = await workspaceService.resendInvitation(invitationId, userId);
+
+    res.json({
+      success: true,
+      data: resentInvitation,
+      message: 'Invitation resent successfully'
+    });
+  } catch (error) {
+    console.error('Error resending invitation:', error);
+    if (error.message === 'Insufficient permissions to resend invitations') {
+      return res.status(403).json({
+        success: false,
+        error: error.message
+      });
+    }
+    if (error.message === 'Invitation not found or already processed') {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resend invitation'
     });
   }
 });

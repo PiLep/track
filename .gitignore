@@ -11,3 +11,9 @@
 /frontend/logs
 /frontend/logs/*
 /frontend/.env
+/frontend/test-results
+/frontend/playwright-report
+
+## common packages
+/node_modules
+/.env.test

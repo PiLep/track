@@ -7,9 +7,10 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "test": "jest",
+    "migrate": "node src/scripts/migrate.js",
     "seed": "node src/scripts/seedDatabase.js",
     "reset": "node src/scripts/resetDatabase.js",
-    "fresh": "npm run reset -- --confirm && npm run seed"
+    "fresh": "npm run reset -- --confirm && npm run migrate && npm run seed"
   },
   "dependencies": {
     "express": "^4.18.2",

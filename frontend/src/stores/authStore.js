@@ -4,12 +4,45 @@ const useAuthStore = create((set, get) => ({
   isAuthenticated: false,
   user: null,
   token: null,
+  rememberMe: false,
 
-  login: async (userData, token) => {
+  login: async (userData, token, rememberMe = false) => {
     if (token) {
-      localStorage.setItem('token', token)
+      let isRememberToken = false;
+      
+      // Decode JWT to check if it's a remember_me token
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        isRememberToken = payload.remember_me || rememberMe;
+      } catch (error) {
+        isRememberToken = rememberMe;
+      }
+      
+      // Store token based on remember_me preference (only if token is valid)
+      if (token && token !== 'null' && token !== 'undefined' && typeof token === 'string' && token.length > 10) {
+        if (isRememberToken) {
+          localStorage.setItem('auth_token', token);
+          sessionStorage.removeItem('auth_token');
+        } else {
+          sessionStorage.setItem('auth_token', token);
+          localStorage.removeItem('auth_token');
+        }
+      } else {
+        throw new Error('Invalid token provided');
+      }
+      
+      // Clean up legacy tokens
+      localStorage.removeItem('token');
+      
+      set({ 
+        isAuthenticated: true, 
+        user: userData, 
+        token,
+        rememberMe: isRememberToken
+      });
+    } else {
+      set({ isAuthenticated: true, user: userData, token, rememberMe: false });
     }
-    set({ isAuthenticated: true, user: userData, token })
 
     // Initialize workspaces
     try {
@@ -21,8 +54,12 @@ const useAuthStore = create((set, get) => ({
   },
 
   logout: () => {
-    localStorage.removeItem('token')
-    set({ isAuthenticated: false, user: null, token: null })
+    // Remove tokens from both storages
+    localStorage.removeItem('auth_token');
+    sessionStorage.removeItem('auth_token');
+    // Legacy cleanup
+    localStorage.removeItem('token');
+    set({ isAuthenticated: false, user: null, token: null, rememberMe: false })
   },
 
   updateUser: (userData) => {
@@ -30,30 +67,75 @@ const useAuthStore = create((set, get) => ({
   },
 
   checkAuth: async () => {
-    const token = localStorage.getItem('token')
-    if (!token) return false
+    // Check for token in both storages (prioritize sessionStorage for current session)
+    const sessionToken = sessionStorage.getItem('auth_token');
+    const localToken = localStorage.getItem('auth_token');
+    const legacyToken = localStorage.getItem('token');
+    
+    // Filter out "null" strings and invalid values
+    const validSessionToken = sessionToken && sessionToken !== 'null' && sessionToken !== 'undefined' ? sessionToken : null;
+    const validLocalToken = localToken && localToken !== 'null' && localToken !== 'undefined' ? localToken : null;
+    const validLegacyToken = legacyToken && legacyToken !== 'null' && legacyToken !== 'undefined' ? legacyToken : null;
+    
+    let token = validSessionToken || validLocalToken || validLegacyToken;
+    
+    // Clean up any corrupted tokens found during check
+    if (sessionToken && (sessionToken === 'null' || sessionToken === 'undefined')) {
+      sessionStorage.removeItem('auth_token');
+    }
+    if (localToken && (localToken === 'null' || localToken === 'undefined')) {
+      localStorage.removeItem('auth_token');
+    }
+    if (legacyToken && (legacyToken === 'null' || legacyToken === 'undefined')) {
+      localStorage.removeItem('token');
+    }
+    
+    if (!token) {
+      return false;
+    }
 
     try {
-      const response = await fetch('http://localhost:3001/api/auth/me', {
+      const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001'
+      const response = await fetch(`${API_BASE}/api/auth/me`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
-      })
+      });
 
-      const data = await response.json()
+      const data = await response.json();
 
       if (data.success) {
-        set({ isAuthenticated: true, user: data.data.user, token })
-        return true
+        // Decode token to determine remember_me status
+        let isRememberToken = false;
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          isRememberToken = payload.remember_me || false;
+        } catch (decodeError) {
+          isRememberToken = false;
+        }
+        
+        set({ 
+          isAuthenticated: true, 
+          user: data.data.user, 
+          token,
+          rememberMe: isRememberToken
+        });
+        
+        return true;
       } else {
-        // Token is invalid, remove it
-        localStorage.removeItem('token')
-        return false
+        // Token is invalid, remove from both storages
+        localStorage.removeItem('auth_token');
+        sessionStorage.removeItem('auth_token');
+        localStorage.removeItem('token'); // Legacy cleanup
+        return false;
       }
     } catch (error) {
-      console.error('Auth check failed:', error)
-      localStorage.removeItem('token')
-      return false
+      console.error('Auth check failed:', error);
+      // Remove invalid tokens
+      localStorage.removeItem('auth_token');
+      sessionStorage.removeItem('auth_token');
+      localStorage.removeItem('token'); // Legacy cleanup
+      return false;
     }
   }
 }))

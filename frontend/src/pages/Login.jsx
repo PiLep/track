@@ -11,6 +11,7 @@ function Login() {
   const [fullName, setFullName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [rememberMe, setRememberMe] = useState(false)
   const user = useAuthStore((state) => state.user)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const login = useAuthStore((state) => state.login)
@@ -25,10 +26,11 @@ function Login() {
     try {
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register'
       const body = isLogin
-        ? { email, password }
+        ? { email, password, remember_me: rememberMe }
         : { email, username, full_name: fullName, password }
 
-      const response = await fetch(`http://localhost:3001${endpoint}`, {
+      const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001'
+      const response = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -37,10 +39,8 @@ function Login() {
       const data = await response.json()
 
       if (data.success) {
-        // Store token in localStorage
-        localStorage.setItem('token', data.data.token)
-        // Update auth store
-        login(data.data.user)
+        // Update auth store (which handles token storage based on rememberMe)
+        await login(data.data.user, data.data.token, rememberMe)
         navigate('/')
       } else {
         setError(data.error || 'Authentication failed')
@@ -60,6 +60,7 @@ function Login() {
     setUsername('')
     setFullName('')
     setError('')
+    setRememberMe(false)
   }
 
   // If user is authenticated, show current user card
@@ -278,6 +279,27 @@ function Login() {
           />
         </div>
 
+        {isLogin && (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            marginBottom: '1rem',
+            fontSize: '0.875rem'
+          }}>
+            <input
+              type="checkbox"
+              id="rememberMe"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              style={{ marginRight: '0.5rem' }}
+              disabled={loading}
+            />
+            <label htmlFor="rememberMe" style={{ color: '#374151', cursor: 'pointer' }}>
+              Keep me signed in for 30 days
+            </label>
+          </div>
+        )}
+
         <button type="submit" className="login-button" disabled={loading}>
           {loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')}
         </button>
@@ -293,6 +315,7 @@ function Login() {
             setPassword('')
             setUsername('')
             setFullName('')
+            setRememberMe(false)
           }}
           style={{
             background: 'none',
