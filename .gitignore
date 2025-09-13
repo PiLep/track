@@ -1,0 +1,13 @@
+## backend
+/backend/node_modules
+/backend/dist
+/backend/logs
+/backend/logs/*
+/backend/.env
+
+## frontend
+/frontend/node_modules
+/frontend/dist
+/frontend/logs
+/frontend/logs/*
+/frontend/.env
